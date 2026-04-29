@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Weather App</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<!-- =======================
+🌍 EXTERNAL LIBRARY
+Leaflet Map for interactive map
+======================= -->
+<link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
+
+<style>
+
+/* =======================
+🎨 GLOBAL THEME SYSTEM
+(using CSS variables)
+======================= */
+:root{
+  --bg:#0b1220;
+  --card:#121a2b;
+  --text:#fff;
+  --accent:#4da3ff;
+}
+
+/* 🌗 Light mode override */
+body.light{
+  --bg:#f2f6ff;
+  --card:#fff;
+  --text:#111;
+}
+
+/* =======================
+🧱 BASE LAYOUT
+======================= */
+body{
+  margin:0;
+  font-family:Arial;
+  background:var(--bg);
+  color:var(--text);
+  transition:0.3s;
+}
+
+.container{
+  max-width:1100px;
+  margin:auto;
+  padding:20px;
+}
+
+/* =======================
+🧭 HEADER SECTION
+======================= */
+.header{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  flex-wrap:wrap;
+}
+
+/* =======================
+🧩 INPUT + BUTTON UI
+======================= */
+input, button, select{
+  padding:10px;
+  border-radius:8px;
+  border:none;
+  margin:5px;
+}
+
+/* =======================
+📦 CARD COMPONENT (reusable UI block)
+======================= */
+.card{
+  background:var(--card);
+  padding:15px;
+  border-radius:12px;
+  margin-top:15px;
+  transition:0.3s;
+  animation:fade 0.5s ease-in;
+}
+
+/* ✨ animation for smooth UI */
+@keyframes fade{
+  from{opacity:0; transform:translateY(10px);}
+  to{opacity:1;}
+}
+
+/* =======================
+📊 GRID SYSTEM (Hourly forecast UI)
+======================= */
+.grid{
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(200px,1fr));
+  gap:10px;
+}
+
+/* small text helper */
+.small{
+  font-size:14px;
+  opacity:0.8;
+}
+
+/* =======================
+🗺️ MAP CONTAINER
+======================= */
+#map{
+  height:300px;
+  border-radius:10px;
+}
+
+/* =======================
+🔘 BUTTON STYLE
+======================= */
+button{
+  cursor:pointer;
+  background:var(--accent);
+  color:#fff;
+}
+
+/* unused placeholder (future theme button style) */
+.toggle{
+  background:#333;
+}
+
+</style>
+</head>
+
+<body>
+
+<div class="container">
+
+<!-- =======================
+🧭 HEADER SECTION (TITLE + ACTIONS)
+======================= -->
+<div class="header">
+  <h2>🌤️ Weather App</h2>
+
+  <!-- 🌗 Theme toggle + 📍 location button -->
+  <div>
+    <button onclick="toggleTheme()">🌗 Theme</button>
+    <button onclick="useLocation()">📍 My Location</button>
+  </div>
+</div>
+
+<!-- =======================
+🔎 SEARCH SYSTEM (CORE INPUT)
+======================= -->
+<div>
+  <input id="city" placeholder="Enter city...">
+  <button onclick="getWeather()">Search</button>
+
+  <!-- 🌡️ Unit switch system -->
+  <select id="unit" onchange="getWeather()">
+    <option value="metric">°C</option>
+    <option value="imperial">°F</option>
+  </select>
+
+  <!-- ⭐ Favorites feature -->
+  <button onclick="saveFavorite()">⭐ Favorite</button>
+</div>
+
+<!-- =======================
+🌡️ CURRENT WEATHER SECTION
+(dynamic data injected by JS)
+======================= -->
+<div class="card" id="current">
+  <h3>Current Weather</h3>
+</div>
+
+<!-- =======================
+🕒 HOURLY FORECAST SECTION (24h simulation)
+======================= -->
+<div class="card">
+  <h3>Hourly Forecast (24h)</h3>
+  <div class="grid" id="hourly"></div>
+</div>
+
+<!-- =======================
+🌫️ AQI + ALERTS SECTION
+======================= -->
+<div class="card">
+  <h3>AQI & Alerts</h3>
+  <div id="aqi"></div>
+</div>
+
+<!-- =======================
+⭐ FAVORITES STORAGE UI
+(localStorage)
+======================= -->
+<div class="card">
+  <h3>⭐ Favorites</h3>
+  <div id="fav"></div>
+</div>
+
+<!-- =======================
+📌 SEARCH HISTORY UI
+(localStorage tracking)
+======================= -->
+<div class="card">
+  <h3>📌 Recent Searches</h3>
+  <div id="history"></div>
+</div>
+
+<!-- =======================
+🗺️ MAP SECTION (Leaflet)
+======================= -->
+<div class="card">
+  <h3>🗺️ Weather Map</h3>
+  <div id="map"></div>
+</div>
+
+</div>
+
+<!-- =======================
+📦 EXTERNAL JS LIBRARY
+======================= -->
+<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+
+<script>
+
+/* =======================
+🔑 API CONFIG
+======================= */
+const API_KEY = "YOUR_OPENWEATHERMAP_API_KEY"; // 🔴 replace this
+
+/* =======================
+🗺️ MAP INIT (GLOBAL)
+======================= */
+let map = L.map('map').setView([23.8, 90.4], 6);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+
+/* =======================
+🌗 THEME TOGGLE FEATURE
+======================= */
+function toggleTheme(){
+  document.body.classList.toggle("light");
+}
+
+/* =======================
+📍 GEOLOCATION FEATURE
+======================= */
+function useLocation(){
+  navigator.geolocation.getCurrentPosition(pos=>{
+    getWeatherByCoords(pos.coords.latitude, pos.coords.longitude);
+  });
+}
+
+/* =======================
+🌡️ MAIN WEATHER FETCH (CORE ENGINE)
+======================= */
+async function getWeather(){
+
+  let city = document.getElementById("city").value;
+  let unit = document.getElementById("unit").value;
+
+  let url = `https://api.openweathermap.org/data/2.5/weather?q=${city}&appid=${API_KEY}&units=${unit}`;
+
+  let data = await fetch(url).then(r=>r.json());
+
+  showCurrent(data);
+  addHistory(city);
+
+  getForecast(city, unit);
+  getAQI(data.coord.lat, data.coord.lon);
+  updateMap(data.coord.lat, data.coord.lon);
+}
+
+/* =======================
+📍 GEO COORD WEATHER
+======================= */
+async function getWeatherByCoords(lat, lon){
+
+  let unit = document.getElementById("unit").value;
+
+  let url = `https://api.openweathermap.org/data/2.5/weather?lat=${lat}&lon=${lon}&appid=${API_KEY}&units=${unit}`;
+
+  let data = await fetch(url).then(r=>r.json());
+
+  showCurrent(data);
+}
+
+/* =======================
+🌡️ UI RENDER: CURRENT WEATHER
+======================= */
+function showCurrent(data){
+  document.getElementById("current").innerHTML = `
+    <h3>${data.name}</h3>
+    <p>🌡️ Temp: ${data.main.temp}</p>
+    <p>🌥️ ${data.weather[0].description}</p>
+    <p>💧 Humidity: ${data.main.humidity}%</p>
+    <p>🌬️ Wind: ${data.wind.speed}</p>
+  `;
+}
+
+/* =======================
+🕒 HOURLY FORECAST ENGINE
+======================= */
+async function getForecast(city, unit){
+
+  let url = `https://api.openweathermap.org/data/2.5/forecast?q=${city}&appid=${API_KEY}&units=${unit}`;
+  let data = await fetch(url).then(r=>r.json());
+
+  let box = document.getElementById("hourly");
+  box.innerHTML = "";
+
+  data.list.slice(0,8).forEach(h=>{
+    box.innerHTML += `
+      <div class="card">
+        <p>${h.dt_txt}</p>
+        <p>🌡️ ${h.main.temp}</p>
+        <p>${h.weather[0].main}</p>
+      </div>
+    `;
+  });
+}
+
+/* =======================
+🌫️ AIR QUALITY INDEX (AQI)
+======================= */
+async function getAQI(lat, lon){
+
+  let url = `https://api.openweathermap.org/data/2.5/air_pollution?lat=${lat}&lon=${lon}&appid=${API_KEY}`;
+  let data = await fetch(url).then(r=>r.json());
+
+  document.getElementById("aqi").innerHTML =
+    "AQI Level: " + data.list[0].main.aqi;
+}
+
+/* =======================
+⭐ FAVORITES (LOCAL STORAGE)
+======================= */
+function saveFavorite(){
+
+  let city = document.getElementById("city").value;
+  let fav = JSON.parse(localStorage.getItem("fav")||"[]");
+
+  fav.push(city);
+
+  localStorage.setItem("fav", JSON.stringify(fav));
+  loadFav();
+}
+
+function loadFav(){
+  let fav = JSON.parse(localStorage.getItem("fav")||"[]");
+  document.getElementById("fav").innerHTML = fav.map(f=>`<p>${f}</p>`).join("");
+}
+loadFav();
+
+/* =======================
+📌 SEARCH HISTORY SYSTEM
+======================= */
+function addHistory(city){
+
+  let h = JSON.parse(localStorage.getItem("history")||"[]");
+
+  h.push(city);
+
+  localStorage.setItem("history", JSON.stringify(h));
+
+  document.getElementById("history").innerHTML =
+    h.map(x=>`<p>${x}</p>`).join("");
+}
+
+/* =======================
+🗺️ MAP UPDATE SYSTEM
+======================= */
+function updateMap(lat, lon){
+  map.setView([lat, lon], 10);
+}
+
+</script>
+
+</body>
+</html>
